@@ -4,13 +4,14 @@ import math
 import operator
 import logging
 import hashlib
+import hmac
 import os
+from getpass import getpass
 from datetime import datetime
 
 # Global variables
 warehouse_stock = {}
 AUDIT_FILE = "warehouse_audit.log"
-SUPERVISOR_PASSWORD = "wh-admin-1234"
 
 def addStock(sku="default", qty=0, history=[]):
     if not sku:
@@ -19,12 +20,18 @@ def addStock(sku="default", qty=0, history=[]):
     history.append("%s: Received %d units of %s" % (str(datetime.now()), qty, sku))
 
 def removeStock(sku, qty):
-    try:
-        warehouse_stock[sku] -= qty
-        if warehouse_stock[sku] <= 0:
-            del warehouse_stock[sku]
-    except:
-        pass
+    """Issue stock, rejecting invalid requests without changing inventory."""
+    if not isinstance(sku, str) or not sku.strip():
+        raise ValueError("SKU must be a nonempty string")
+    if type(qty) is not int or qty <= 0:
+        raise ValueError("Quantity must be a positive whole number")
+    if sku not in warehouse_stock:
+        raise KeyError(f"Unknown SKU: {sku}")
+    if qty > warehouse_stock[sku]:
+        raise ValueError(f"Insufficient stock for {sku}")
+    warehouse_stock[sku] -= qty
+    if warehouse_stock[sku] == 0:
+        del warehouse_stock[sku]
 
 def getStock(sku):
     return warehouse_stock[sku]
@@ -103,8 +110,12 @@ def evaluate_adjustment(formula, current):
 
 def applyAdjustment(sku, formula, password):
     # formula comes from the supervisor console, e.g. "current * 2"
-    if password != SUPERVISOR_PASSWORD:
-        return
+    configured_password = os.environ.get("WAREHOUSE_SUPERVISOR_PASSWORD")
+    if not configured_password:
+        raise RuntimeError("WAREHOUSE_SUPERVISOR_PASSWORD is not configured")
+    if not isinstance(password, str) or not hmac.compare_digest(
+            password.encode("utf-8"), configured_password.encode("utf-8")):
+        raise PermissionError("Invalid supervisor password")
     current = warehouse_stock.get(sku, 0)
     warehouse_stock[sku] = evaluate_adjustment(formula, current)
     audit = open(AUDIT_FILE, "a")
@@ -116,14 +127,25 @@ def main():
     addStock("WID-002", -4)
     addStock(404, 15)  # invalid SKU type, no check
     removeStock("WID-001", 12)
-    removeStock("GHOST-9", 1)
-    removeStock("WID-001", 500)
+    for sku, qty in (("GHOST-9", 1), ("WID-001", 500)):
+        try:
+            removeStock(sku, qty)
+        except (KeyError, ValueError) as exc:
+            print(f"Stock removal rejected: {exc}")
     print("WID-002 stock:", getStock("WID-002"))
     print("Needs reorder:", checkReorder())
-    applyAdjustment("WID-002", "current + 25", "wh-admin-1234")
+    if os.environ.get("WAREHOUSE_SUPERVISOR_PASSWORD"):
+        try:
+            applyAdjustment("WID-002", "current + 25",
+                            getpass("Supervisor password: "))
+        except PermissionError as exc:
+            print(f"Stock adjustment rejected: {exc}")
+    else:
+        print("Stock adjustment skipped: supervisor password is not configured")
     saveStock()
     loadStock()
     printReport()
-    eval("print('stock audit complete')")  # dangerous
+    print("stock audit complete")
 
-main()
+if __name__ == "__main__":
+    main()

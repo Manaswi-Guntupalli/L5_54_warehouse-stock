@@ -51,3 +51,15 @@ The code works, but only just. It has quality, style and security problems of th
 **Target:** aim for a Pylint score above 9.5 on your final file. A perfect 10.00/10 is very good.
 
 Be ready to explain the bugs you found and how you fixed them. You may be called on to present.
+
+## Supervisor authentication
+
+Set `WAREHOUSE_SUPERVISOR_PASSWORD` in your environment before starting the
+program to enable supervisor adjustments. There is no default password. The
+demo prompts for the password without echoing it; when the environment variable
+is absent or empty, it skips the adjustment. Do not commit your password.
+
+`applyAdjustment` raises `RuntimeError` when authentication is not configured
+and `PermissionError` for an incorrect password. `removeStock` raises `KeyError`
+for an unknown SKU and `ValueError` for invalid quantities or insufficient stock,
+leaving inventory unchanged on rejection.
