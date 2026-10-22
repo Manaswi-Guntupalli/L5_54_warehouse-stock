@@ -1,5 +1,9 @@
 # Lab 5: Static Code Analysis — Warehouse Stock Manager
 
+Stock receipts require a nonempty string SKU and a nonnegative integer quantity
+(Boolean values are rejected). A zero receipt can register a new product.
+Removing the last units keeps the SKU at zero so reorder checks still find it.
+
 **Your file:** `warehouse_stock_manager.py`
 **Python:** 3.10 or newer
 

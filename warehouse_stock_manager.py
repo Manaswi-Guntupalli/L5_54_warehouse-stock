@@ -16,16 +16,18 @@ AUDIT_FILE = "warehouse_audit.log"
 
 
 def add_stock(sku="default", qty=0, history=None):
-    """Receive stock and optionally record it in the supplied history list."""
-    if not sku:
-        return
+    """Receive nonnegative whole units and optionally record their history."""
+    if not isinstance(sku, str) or not sku.strip():
+        raise ValueError("SKU must be a nonempty string")
+    if isinstance(qty, bool) or not isinstance(qty, int) or qty < 0:
+        raise ValueError("Quantity must be a nonnegative whole number")
     warehouse_stock[sku] = warehouse_stock.get(sku, 0) + qty
     if history is not None:
         history.append(f"{datetime.now()}: Received {qty} units of {sku}")
 
 
 def remove_stock(sku, qty):
-    """Issue stock, rejecting invalid requests without changing inventory."""
+    """Issue stock, retaining empty SKUs for reorder checks."""
     if not isinstance(sku, str) or not sku.strip():
         raise ValueError("SKU must be a nonempty string")
     if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
@@ -35,8 +37,6 @@ def remove_stock(sku, qty):
     if qty > warehouse_stock[sku]:
         raise ValueError(f"Insufficient stock for {sku}")
     warehouse_stock[sku] -= qty
-    if warehouse_stock[sku] == 0:
-        del warehouse_stock[sku]
 
 
 def get_stock(sku):
@@ -148,8 +148,12 @@ def apply_adjustment(sku, formula, password):
 def main():
     """Run the stock-management demonstration and report rejected requests."""
     add_stock("WID-001", 40)
-    add_stock("WID-002", -4)
-    add_stock(404, 15)  # invalid SKU type, no check
+    add_stock("WID-002", 4)
+    for sku, qty in (("WID-002", -4), (404, 15)):
+        try:
+            add_stock(sku, qty)
+        except ValueError as exc:
+            print(f"Stock receipt rejected: {exc}")
     remove_stock("WID-001", 12)
     for sku, qty in (("GHOST-9", 1), ("WID-001", 500)):
         try:

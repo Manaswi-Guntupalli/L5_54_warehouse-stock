@@ -1,5 +1,18 @@
 # Issues Found and Fixed
 
+## Stock validation and reorder fixes
+
+After the earlier cleanup, I checked two more problems in the stock logic.
+
+| Issue | Type | Location | Description | Fix Approach |
+|-------|------|----------|-------------|--------------|
+| Negative stock receipts | Input validation | `add_stock()` | A negative quantity reduced inventory even though this function is meant to receive stock. | Reject negative quantities, fractions, Boolean values and other non-integer inputs before changing inventory or history. Also require a nonempty string SKU. |
+| Empty products missing from reorder checks | Logic | `remove_stock()` | Removing the last units deleted the SKU, so it no longer appeared in the reorder list. | Keep the SKU with quantity zero so it can still be reported, saved and flagged for replenishment. |
+
+I allowed zero in `add_stock()` so a new product can be registered before any units arrive. Removing stock still requires a positive quantity. I also updated the demo to show invalid receipts being rejected without stopping the program.
+
+I checked that rejected receipts leave both stock and history unchanged. Removing all ten units from a product now leaves it at zero and includes it in `check_reorder()`. The zero quantity survives saving and loading, and receiving enough stock removes the product from the reorder list again. Pylint still scores **10.00/10**, and Flake8 and Bandit both pass. The three reports have been refreshed.
+
 I used the Pylint, Flake8 and Bandit reports to check the warehouse stock manager. I started with the five security issues listed by Bandit and fixed them in priority order: the high-severity issue first, followed by the medium- and low-severity issues.
 
 The line numbers in the table refer to the original code. They have changed because the fixes added more code.
