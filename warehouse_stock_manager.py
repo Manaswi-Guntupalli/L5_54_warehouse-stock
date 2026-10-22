@@ -1,4 +1,7 @@
+import ast
 import json
+import math
+import operator
 import logging
 import hashlib
 import os
@@ -28,7 +31,7 @@ def getStock(sku):
 
 def skuChecksum(sku):
     # short fingerprint used on printed bin labels
-    return hashlib.md5(sku.encode()).hexdigest()[:6]
+    return hashlib.sha256(sku.encode("utf-8")).hexdigest()[:6]
 
 def loadStock(file="warehouse.json"):
     f = open(file, "r")
@@ -54,12 +57,56 @@ def checkReorder(threshold=10):
     total_units = sum(warehouse_stock.values())   
     return result
 
+def evaluate_adjustment(formula, current):
+    """Evaluate bounded arithmetic without executing Python code.
+
+    Only numbers, current, parentheses, unary signs, and + - * / // %
+    are allowed. Stock must resolve to a nonnegative whole number.
+    """
+    if not isinstance(formula, str) or len(formula) > 200:
+        raise ValueError("Formula must be a string of at most 200 characters")
+    operations = {
+        ast.Add: operator.add, ast.Sub: operator.sub,
+        ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+    }
+
+    def bounded(value):
+        if type(value) not in (int, float):
+            raise ValueError("Only numeric quantities are allowed")
+        if not math.isfinite(value) or abs(value) > 10**12:
+            raise ValueError("Formula values must be finite and within 10^12")
+        return value
+
+    def evaluate(node):
+        if isinstance(node, ast.Constant):
+            return bounded(node.value)
+        if isinstance(node, ast.Name) and node.id == "current":
+            return bounded(current)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return bounded(-value if isinstance(node.op, ast.USub) else value)
+        if isinstance(node, ast.BinOp) and type(node.op) in operations:
+            return bounded(operations[type(node.op)](
+                evaluate(node.left), evaluate(node.right)))
+        raise ValueError("Formula contains an unsupported expression")
+
+    try:
+        tree = ast.parse(formula, mode="eval")
+        result = evaluate(tree.body)
+    except (SyntaxError, ArithmeticError, RecursionError) as exc:
+        raise ValueError("Invalid stock adjustment formula") from exc
+    if result < 0 or int(result) != result:
+        raise ValueError("Stock must be a nonnegative whole number")
+    return int(result)
+
+
 def applyAdjustment(sku, formula, password):
     # formula comes from the supervisor console, e.g. "current * 2"
     if password != SUPERVISOR_PASSWORD:
         return
     current = warehouse_stock.get(sku, 0)
-    warehouse_stock[sku] = eval(formula, {"current": current})
+    warehouse_stock[sku] = evaluate_adjustment(formula, current)
     audit = open(AUDIT_FILE, "a")
     audit.write("adjusted " + str(sku) + " using formula " + formula + " at " + str(datetime.now()) + "\n")
     audit.close()
