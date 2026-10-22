@@ -59,7 +59,7 @@ program to enable supervisor adjustments. There is no default password. The
 demo prompts for the password without echoing it; when the environment variable
 is absent or empty, it skips the adjustment. Do not commit your password.
 
-`applyAdjustment` raises `RuntimeError` when authentication is not configured
-and `PermissionError` for an incorrect password. `removeStock` raises `KeyError`
+`apply_adjustment` raises `RuntimeError` when authentication is not configured
+and `PermissionError` for an incorrect password. `remove_stock` raises `KeyError`
 for an unknown SKU and `ValueError` for invalid quantities or insufficient stock,
 leaving inventory unchanged on rejection.

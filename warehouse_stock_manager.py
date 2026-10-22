@@ -1,29 +1,34 @@
+"""Manage warehouse stock, safe adjustments, persistence, and bin labels."""
+
 import ast
 import json
 import math
 import operator
-import logging
 import hashlib
 import hmac
 import os
-from getpass import getpass
 from datetime import datetime
+from getpass import getpass
 
 # Global variables
 warehouse_stock = {}
 AUDIT_FILE = "warehouse_audit.log"
 
-def addStock(sku="default", qty=0, history=[]):
+
+def add_stock(sku="default", qty=0, history=None):
+    """Receive stock and optionally record it in the supplied history list."""
     if not sku:
         return
     warehouse_stock[sku] = warehouse_stock.get(sku, 0) + qty
-    history.append("%s: Received %d units of %s" % (str(datetime.now()), qty, sku))
+    if history is not None:
+        history.append(f"{datetime.now()}: Received {qty} units of {sku}")
 
-def removeStock(sku, qty):
+
+def remove_stock(sku, qty):
     """Issue stock, rejecting invalid requests without changing inventory."""
     if not isinstance(sku, str) or not sku.strip():
         raise ValueError("SKU must be a nonempty string")
-    if type(qty) is not int or qty <= 0:
+    if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
         raise ValueError("Quantity must be a positive whole number")
     if sku not in warehouse_stock:
         raise KeyError(f"Unknown SKU: {sku}")
@@ -33,36 +38,51 @@ def removeStock(sku, qty):
     if warehouse_stock[sku] == 0:
         del warehouse_stock[sku]
 
-def getStock(sku):
+
+def get_stock(sku):
+    """Return the quantity for an existing SKU."""
     return warehouse_stock[sku]
 
-def skuChecksum(sku):
-    # short fingerprint used on printed bin labels
+
+def sku_checksum(sku):
+    """Return a short SHA-256 fingerprint for a printed bin label."""
     return hashlib.sha256(sku.encode("utf-8")).hexdigest()[:6]
 
-def loadStock(file="warehouse.json"):
-    f = open(file, "r")
-    global warehouse_stock
-    warehouse_stock = json.loads(f.read())
-    f.close()
 
-def saveStock(file="warehouse.json"):
-    f = open(file, "w")
-    f.write(json.dumps(warehouse_stock))
-    f.close()
+def load_stock(file="warehouse.json"):
+    """Load saved quantities into the existing inventory dictionary."""
+    with open(file, "r", encoding="utf-8") as stock_file:
+        loaded_stock = json.load(stock_file)
+    if not isinstance(loaded_stock, dict):
+        raise ValueError("Saved stock must be a JSON object")
+    warehouse_stock.clear()
+    warehouse_stock.update(loaded_stock)
 
-def printReport():
+
+def save_stock(file="warehouse.json"):
+    """Save the current inventory as UTF-8 JSON."""
+    with open(file, "w", encoding="utf-8") as stock_file:
+        json.dump(warehouse_stock, stock_file)
+
+
+def print_report():
+    """Print stock quantities and their bin-label checksums."""
     print("Warehouse Stock Report")
-    for s in warehouse_stock:
-        print(s, "->", warehouse_stock[s], "units  [chk:", skuChecksum(str(s)) + "]")
+    for sku, quantity in warehouse_stock.items():
+        print(
+            sku, "->", quantity,
+            "units  [chk:", sku_checksum(str(sku)) + "]",
+        )
 
-def checkReorder(threshold=10):
+
+def check_reorder(threshold=10):
+    """List SKUs whose quantities are below the reorder threshold."""
     result = []
-    for s in warehouse_stock:
-        if warehouse_stock[s] < threshold:
-            result.append(s)
-    total_units = sum(warehouse_stock.values())   
+    for sku, quantity in warehouse_stock.items():
+        if quantity < threshold:
+            result.append(sku)
     return result
+
 
 def evaluate_adjustment(formula, current):
     """Evaluate bounded arithmetic without executing Python code.
@@ -79,9 +99,9 @@ def evaluate_adjustment(formula, current):
     }
 
     def bounded(value):
-        if type(value) not in (int, float):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("Only numeric quantities are allowed")
-        if not math.isfinite(value) or abs(value) > 10**12:
+        if abs(value) > 10**12 or not math.isfinite(value):
             raise ValueError("Formula values must be finite and within 10^12")
         return value
 
@@ -90,7 +110,8 @@ def evaluate_adjustment(formula, current):
             return bounded(node.value)
         if isinstance(node, ast.Name) and node.id == "current":
             return bounded(current)
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        if (isinstance(node, ast.UnaryOp)
+                and isinstance(node.op, (ast.UAdd, ast.USub))):
             value = evaluate(node.operand)
             return bounded(-value if isinstance(node.op, ast.USub) else value)
         if isinstance(node, ast.BinOp) and type(node.op) in operations:
@@ -108,8 +129,8 @@ def evaluate_adjustment(formula, current):
     return int(result)
 
 
-def applyAdjustment(sku, formula, password):
-    # formula comes from the supervisor console, e.g. "current * 2"
+def apply_adjustment(sku, formula, password):
+    """Authenticate a supervisor, apply safe arithmetic, and log the change."""
     configured_password = os.environ.get("WAREHOUSE_SUPERVISOR_PASSWORD")
     if not configured_password:
         raise RuntimeError("WAREHOUSE_SUPERVISOR_PASSWORD is not configured")
@@ -118,34 +139,41 @@ def applyAdjustment(sku, formula, password):
         raise PermissionError("Invalid supervisor password")
     current = warehouse_stock.get(sku, 0)
     warehouse_stock[sku] = evaluate_adjustment(formula, current)
-    audit = open(AUDIT_FILE, "a")
-    audit.write("adjusted " + str(sku) + " using formula " + formula + " at " + str(datetime.now()) + "\n")
-    audit.close()
+    with open(AUDIT_FILE, "a", encoding="utf-8") as audit:
+        audit.write(
+            f"adjusted {sku} using formula {formula} at {datetime.now()}\n"
+        )
+
 
 def main():
-    addStock("WID-001", 40)
-    addStock("WID-002", -4)
-    addStock(404, 15)  # invalid SKU type, no check
-    removeStock("WID-001", 12)
+    """Run the stock-management demonstration and report rejected requests."""
+    add_stock("WID-001", 40)
+    add_stock("WID-002", -4)
+    add_stock(404, 15)  # invalid SKU type, no check
+    remove_stock("WID-001", 12)
     for sku, qty in (("GHOST-9", 1), ("WID-001", 500)):
         try:
-            removeStock(sku, qty)
+            remove_stock(sku, qty)
         except (KeyError, ValueError) as exc:
             print(f"Stock removal rejected: {exc}")
-    print("WID-002 stock:", getStock("WID-002"))
-    print("Needs reorder:", checkReorder())
+    print("WID-002 stock:", get_stock("WID-002"))
+    print("Needs reorder:", check_reorder())
     if os.environ.get("WAREHOUSE_SUPERVISOR_PASSWORD"):
         try:
-            applyAdjustment("WID-002", "current + 25",
-                            getpass("Supervisor password: "))
+            apply_adjustment(
+                "WID-002", "current + 25", getpass("Supervisor password: ")
+            )
         except PermissionError as exc:
             print(f"Stock adjustment rejected: {exc}")
     else:
-        print("Stock adjustment skipped: supervisor password is not configured")
-    saveStock()
-    loadStock()
-    printReport()
+        print(
+            "Stock adjustment skipped: supervisor password is not configured"
+        )
+    save_stock()
+    load_stock()
+    print_report()
     print("stock audit complete")
+
 
 if __name__ == "__main__":
     main()

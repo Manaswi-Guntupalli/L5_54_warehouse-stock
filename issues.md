@@ -10,11 +10,11 @@ The line numbers in the table refer to the original code. They have changed beca
 | Unsafe `eval()` for stock adjustment (B307), priority 2 | Security - Medium | 62 | The adjustment formula was passed directly to `eval()`. This could execute Python code instead of just calculating a stock quantity. | Added `evaluate_adjustment()` to parse the formula with `ast` and allow only specific arithmetic operations and the name `current`. |
 | Unnecessary `eval()` (B307), priority 3 | Security - Medium | 80 | The program used `eval()` just to print the message `stock audit complete`. There was no need to evaluate Python code for this. | Replaced it with a normal `print()` call. |
 | Hardcoded password (B105), priority 4 | Security - Low | 10 | The supervisor password was written directly in the source code and repeated in the demo. Anyone reading the file could see it. | Removed both occurrences and used the `WAREHOUSE_SUPERVISOR_PASSWORD` environment variable. Added checks for missing configuration and incorrect passwords. |
-| Silent exception handling (B110), priority 5 | Error handling - Low | 23-24 | `removeStock()` used a bare `except` followed by `pass`. This hid errors, so a failed removal could look like it had worked. | Added input and stock checks that raise specific errors. Updated the demo to catch expected errors and display the reason for rejection. |
+| Silent exception handling (B110), priority 5 | Error handling - Low | 23-24 | `remove_stock()` used a bare `except` followed by `pass`. This hid errors, so a failed removal could look like it had worked. | Added input and stock checks that raise specific errors. Updated the demo to catch expected errors and display the reason for rejection. |
 
 ## Step 1: Replace MD5
 
-I changed `skuChecksum()` to use `hashlib.sha256()` with UTF-8 encoding. I kept the six-character output because it is used as a short bin label. I also checked that the function returns the expected SHA-256 prefix for a sample SKU.
+I changed `sku_checksum()` to use `hashlib.sha256()` with UTF-8 encoding. I kept the six-character output because it is used as a short bin label. I also checked that the function returns the expected SHA-256 prefix for a sample SKU.
 
 The short label can still have collisions, so it should not be treated as a unique identifier or a security check.
 
@@ -32,16 +32,25 @@ I replaced the last `eval()` with `print("stock audit complete")`. The message s
 
 ## Step 4: Remove the password from the code
 
-The program now reads the configured password from `WAREHOUSE_SUPERVISOR_PASSWORD`. There is no fallback password. `applyAdjustment()` raises `RuntimeError` if the variable is missing or empty, and `PermissionError` if the supplied password is incorrect. The comparison uses `hmac.compare_digest()`.
+The program now reads the configured password from `WAREHOUSE_SUPERVISOR_PASSWORD`. There is no fallback password. `apply_adjustment()` raises `RuntimeError` if the variable is missing or empty, and `PermissionError` if the supplied password is incorrect. The comparison uses `hmac.compare_digest()`.
 
 In the demo, `getpass()` asks for the password without displaying it. If no password is configured, the demo explains that the adjustment is skipped. I checked missing and empty configuration, incorrect passwords and successful authentication. Failed authentication does not change stock or create an audit entry.
 
 ## Step 5: Report stock-removal errors properly
 
-I removed the blanket exception handler from `removeStock()`. It now checks that the SKU is a nonempty string and the quantity is a positive integer. An unknown SKU raises `KeyError`; invalid quantities and insufficient stock raise `ValueError`.
+I removed the blanket exception handler from `remove_stock()`. It now checks that the SKU is a nonempty string and the quantity is a positive integer. An unknown SKU raises `KeyError`; invalid quantities and insufficient stock raise `ValueError`.
 
 These checks happen before changing inventory. I checked partial removal, removal of the exact available quantity, an unknown SKU, insufficient stock and invalid quantities. Rejected requests leave inventory unchanged. The demo catches the expected errors and prints an explanation instead of hiding them.
 
 ## Final check
 
 After the fixes, I reran Bandit, Pylint and Flake8. Bandit reported no findings, so all five security findings listed above are resolved. Pylint scored the current code at **7.18/10**, and Flake8 still reported style issues. There is more cleanup to do before reaching the README's Pylint target of above 9.5; fixing these five findings does not mean the whole program is free of bugs.
+
+
+## Pylint cleanup after the security fixes
+
+After fixing the five security findings, I worked through the remaining Pylint warnings. I renamed the functions to snake_case and updated their calls, added module and function docstrings, removed the unused import and variable, and fixed spacing and long lines. I also replaced the shared history-list default with `None`, used an f-string for history entries, and kept Boolean values out of numeric quantity checks.
+
+File operations now use `with open(...)` and an explicit UTF-8 encoding. Loading stock updates the existing dictionary instead of using a `global` statement. The report and reorder functions now loop through dictionary items directly.
+
+The earlier 7.18/10 score above records the stage before this cleanup. The latest run scored **10.00/10 in Pylint**, with no warnings suppressed. Flake8 and Bandit also passed with no findings. I checked stock operations, history recording, JSON saving and loading, authentication, unsafe formulas and the complete demo after the changes. The updated results are saved in the three report files.
